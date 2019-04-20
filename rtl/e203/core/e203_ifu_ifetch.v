@@ -106,6 +106,16 @@ module e203_ifu_ifetch(
   input  rst_n
   );
 
+  /*
+  Comment by 刘伟森
+  
+  握手信号
+  ifu_req：请求取指，当请求取指时，将ifu_req_valid拉高
+  ifu_rsp：返回指令，当允许返回指令时，将ifu_rsp_ready拉高
+  ifu_ir_o：将指令送往EXU，当指令寄存器更新时，将ifu_o_valid拉高
+  pipe_flush：冲刷信号，pipe_flush_ack恒为1，所以pipe_flush_hsked与pipe_flush_req相同
+  */
+  
   wire ifu_req_hsked  = (ifu_req_valid & ifu_req_ready) ;
   wire ifu_rsp_hsked  = (ifu_rsp_valid & ifu_rsp_ready) ;
   wire ifu_ir_o_hsked = (ifu_o_valid & ifu_o_ready) ;
@@ -219,6 +229,30 @@ module e203_ifu_ifetch(
   wire ir_pc_vld_nxt;
 
 
+  /*
+  Comment by 刘伟森
+  
+  这里实现了IFU和EXU两个流水段之间的流水线寄存器
+  ir_valid_r表示ifu_ir_r寄存器的情况，如果内容更新则拉高，然后将内容送往EXU，EXU接受后拉低，不接受则保持高电平
+  ir_pc_vld_r表示ifu_pc_r寄存器的情况，如果内容更新则拉高，然后将内容送往EXU，EXU接受后拉低，不接受则保持高电平
+  
+  这两个信号的结构是相同的，set为1表示在下一个周期将信号拉高，clr为1表示在下一个周期将信号拉低
+  当set和clr同时为1时，set占优，在下一个周期将信号拉高
+  
+  replay是未实现功能，可以忽略掉带有replay的信号
+  
+  ir_valid_r拉高的条件（ir_valid_set）：指令返回通道握手成功并且没有冲刷信号
+  ir_valid_r拉低的条件（ir_valid_clr）：指令送往EXU的通道握手成功或者请求将指令送往EXU但未握手成功并且有冲刷信号
+  
+  ir_pc_vld_r拉高的条件（ir_pc_vld_set）：PC更新且IFU_EXU_IR允许写入且没有冲刷信号
+  ir_pc_vld_r拉低的条件（ir_pc_vld_clr）：同ir_valid_r
+  
+  ir_valid_set为IFU_EXU_IR寄存器的使能信号，当指令为16位时，只写入低16位
+  ir_pc_vld_set为IFU_EXU_PC寄存器的使能信号
+  
+  不能理解为什么这两个寄存器的使能信号不同
+  */
+  
      // The ir valid is set when there is new instruction fetched *and* 
      //   no flush happening 
   wire ifu_rsp_need_replay;
@@ -278,6 +312,16 @@ module e203_ifu_ifetch(
   wire [`E203_RFIDX_WIDTH-1:0] minidec_fpu_rs2idx = `E203_RFIDX_WIDTH'b0;
   `endif//}
 
+  /*
+  Comment by 刘伟森
+  
+  源操作数寄存器号，通过minidec模块译码后得到，由IFU传到EXU，EXU阶段不再对寄存器号进行译码
+  对于jar指令，如果寄存器号为0或1，那么可以异步读取
+  寄存器0直接为0，寄存器1在寄存器实现中直接将它的值单独输出，因为寄存器1往往作为函数返回地址，所以做了特别处理
+  而其它寄存器需要寄存器号才能读取
+  寄存器模块的地址线和ir_rs1idx_r、ir_rs2idx_r相连，jar指令需要等待寄存器号写入到ir_rs1idx_r中
+  */
+  
   wire [`E203_RFIDX_WIDTH-1:0] ir_rs1idx_r;
   wire [`E203_RFIDX_WIDTH-1:0] ir_rs2idx_r;
   wire bpu2rf_rs1_ena;
@@ -511,6 +555,19 @@ module e203_ifu_ifetch(
 
 
   assign ifu_req_pc    = pc_nxt;
+  
+  /*
+  Comment by 刘伟森
+  
+  out_flag_r表示取指情况，当有新的取指操作时拉高，然后等待指令返回后拉低
+  正常的想法应该是从ITCM读出指令时，指令返回通道就应该握手成功
+  但实际上是只有当IR寄存器可以写入的时候，指令返回通道才会握手成功
+  当指令返回通道握手成功时，指令也获得了，nPC也计算出来了，于是会发起新的取指
+  此时out_flag_set和out_flag_clr同时为1
+  当out_flag_set设为1后，out_flag_r保持为1，直到out_flag_clr设为1
+  但是out_flag_clr为1时，out_flag_set也为1，所以out_flag_r依旧为1
+  所以out_flag_r从第一次取指开始一直保持为1
+  */
 
      // The out_flag will be set if there is a new request handshaked
   wire out_flag_set = ifu_req_hsked;
@@ -522,6 +579,14 @@ module e203_ifu_ifetch(
 
   sirv_gnrl_dfflr #(1) out_flag_dfflr (out_flag_ena, out_flag_nxt, out_flag_r, clk, rst_n);
 
+  /*
+  Comment by 刘伟森
+  
+  pc_newpend表示PC更新
+  写入新PC时拉高
+  写入流水线寄存器时拉低
+  */
+  
        // The pc_newpend will be set if there is a new PC loaded
   wire pc_newpend_set = pc_ena;
      // The pc_newpend will be cleared if have already loaded into the IR-PC stage

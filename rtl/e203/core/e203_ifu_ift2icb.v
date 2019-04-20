@@ -282,6 +282,16 @@ module e203_ifu_ift2icb(
 //
 // ===========================================================================
 
+  /*
+  Comment by 刘伟森
+  
+  ifu_req_pc2itcm表示要到ITCM取指
+  ITCM的宽度为64位，输出为一个与64位地址区间对齐的数据，称为一个lane
+  ifu_req_lane_cross表示需要跨lane取指
+  ifu_req_lane_begin表示指令地址为一个lane的开始
+  ifu_req_lane_same表示是否和上一条取回的指令在同一个lane
+  */
+  
   `ifdef E203_HAS_ITCM //{
   wire ifu_req_pc2itcm = (ifu_req_pc[`E203_ITCM_BASE_REGION] == itcm_region_indic[`E203_ITCM_BASE_REGION]); 
   `endif//}
